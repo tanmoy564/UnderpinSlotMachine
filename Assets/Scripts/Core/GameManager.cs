@@ -14,11 +14,18 @@ public class GameManager : MonoBehaviour
     [Header("Economy")]
     [SerializeField] private SlotEconomy economy;
 
+    [Header("Betting UI")]
+    [SerializeField] private GameObject bettingPanel;
+
     [Header("Payout Multipliers")]
     [SerializeField] private int sevenMultiplier = 10;
     [SerializeField] private int cherriesMultiplier = 5;
     [SerializeField] private int bellMultiplier = 3;
     [SerializeField] private int barMultiplier = 2;
+
+    [Header("Bonus Settings")]
+    [SerializeField] private Sprite goldenStarSymbol;
+    [SerializeField] private int bonusMultiplier = 5;
 
     [Header("Spin Settings")]
     [SerializeField] private float spinDuration = 2.5f;
@@ -29,8 +36,10 @@ public class GameManager : MonoBehaviour
     [SerializeField] private TMP_Text winAmountText;
     [SerializeField] private float winPopupDuration = 2f;
 
-    private bool isSpinning;
+    [Header("Audio")]
+    [SerializeField] private AudioManager audioManager;
 
+    private bool isSpinning;
     public bool IsSpinning => isSpinning;
 
     private Coroutine winPopupCoroutine;
@@ -48,11 +57,17 @@ public class GameManager : MonoBehaviour
 
         if (winPanel != null)
             winPanel.SetActive(false);
+
+        if (bettingPanel != null)
+            bettingPanel.SetActive(true);
     }
 
     public void StartSpin()
     {
         if (isSpinning)
+            return;
+
+        if (winPanel != null && winPanel.activeSelf)
             return;
 
         if (!ValidateReferences())
@@ -61,13 +76,14 @@ public class GameManager : MonoBehaviour
         if (!economy.TrySpendBet())
             return;
 
-        if (winPanel != null)
-            winPanel.SetActive(false);
+        // Hide betting options during the spin.
+        if (bettingPanel != null)
+            bettingPanel.SetActive(false);
 
-        if (winPopupCoroutine != null)
+        if (audioManager != null)
         {
-            StopCoroutine(winPopupCoroutine);
-            winPopupCoroutine = null;
+            audioManager.PlayButtonClick();
+            audioManager.StartSpinSound();
         }
 
         StartCoroutine(SpinRoutine());
@@ -104,6 +120,7 @@ public class GameManager : MonoBehaviour
         isSpinning = true;
 
         Sprite[] results = new Sprite[reels.Length];
+        bool[] previousReelStates = new bool[reels.Length];
 
         for (int i = 0; i < reels.Length; i++)
         {
@@ -118,27 +135,43 @@ public class GameManager : MonoBehaviour
             float reelDuration = spinDuration + (i * stopInterval);
 
             StartCoroutine(reels[i].SpinTo(results[i], reelDuration));
+            previousReelStates[i] = reels[i].IsSpinning;
         }
 
+        // Detect each reel stopping.
         bool anyReelSpinning = true;
 
         while (anyReelSpinning)
         {
             anyReelSpinning = false;
 
-            foreach (ReelController reel in reels)
+            for (int i = 0; i < reels.Length; i++)
             {
-                if (reel.IsSpinning)
+                bool currentlySpinning = reels[i].IsSpinning;
+
+                if (previousReelStates[i] && !currentlySpinning)
                 {
-                    anyReelSpinning = true;
-                    break;
+                    if (audioManager != null)
+                        audioManager.PlayReelStop();
                 }
+
+                previousReelStates[i] = currentlySpinning;
+
+                if (currentlySpinning)
+                    anyReelSpinning = true;
             }
 
             yield return null;
         }
 
+        if (audioManager != null)
+            audioManager.StopSpinSound();
+
         CheckWin(results);
+
+        // Show betting options again after all reels stop.
+        if (bettingPanel != null)
+            bettingPanel.SetActive(true);
 
         isSpinning = false;
     }
@@ -159,12 +192,26 @@ public class GameManager : MonoBehaviour
             return;
         }
 
+        // Golden Star bonus.
+        if (goldenStarSymbol != null && results[0] == goldenStarSymbol)
+        {
+            int bonusWinnings = economy.CurrentBet * bonusMultiplier;
+
+            economy.AddWinnings(bonusWinnings);
+
+            if (audioManager != null)
+                audioManager.PlayBonus();
+
+            Debug.Log("LUCKY BONUS! Won " + bonusWinnings + " credits!");
+
+            ShowWinPopup("LUCKY BONUS!", bonusWinnings);
+            return;
+        }
+
         int multiplier = GetMultiplier(results[0]);
         int winnings = economy.CurrentBet * multiplier;
 
         economy.AddWinnings(winnings);
-
-        Debug.Log($"JACKPOT! Won {winnings} credits!");
 
         string winMessage = economy.CurrentBet switch
         {
@@ -173,6 +220,16 @@ public class GameManager : MonoBehaviour
             100 => "JACKPOT!",
             _ => "YOU WIN!"
         };
+
+        if (audioManager != null)
+        {
+            if (economy.CurrentBet == 100)
+                audioManager.PlayJackpot();
+            else
+                audioManager.PlayCoinPayout();
+        }
+
+        Debug.Log("Won " + winnings + " credits!");
 
         ShowWinPopup(winMessage, winnings);
     }

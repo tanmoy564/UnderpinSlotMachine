@@ -12,6 +12,10 @@ public class SlotEconomy : MonoBehaviour
     public int startingCredits = 1000;
     public int currentBet = 10;
 
+    [Header("Bet Button Audio")]
+    [SerializeField] private AudioSource betAudioSource;
+    [SerializeField] private AudioClip betClickSound;
+
     public int Credits { get; private set; }
 
     public int CurrentBet => currentBet;
@@ -38,8 +42,17 @@ public class SlotEconomy : MonoBehaviour
             return;
         }
 
+        if (currentBet == amount)
+            return;
+
         currentBet = amount;
         UpdateUI();
+
+        // Play betting button sound.
+        if (betAudioSource != null && betClickSound != null)
+        {
+            betAudioSource.PlayOneShot(betClickSound);
+        }
 
         Debug.Log("Bet selected: " + currentBet);
     }
